@@ -1,8 +1,10 @@
+
 import { useState } from 'react'
 
 import MainLayout from './layouts/MainLayout'
 import DashboardPage from './pages/Dashboard/DashboardPage'
 import AcademicTermsPage from './pages/AcademicSetup/AcademicTermsPage'
+import ProgramsPage from './pages/AcademicSetup/ProgramsPage'
 
 function App() {
   const [activePage, setActivePage] = useState('Dashboard')
@@ -18,6 +20,9 @@ function App() {
 
       case 'Academic Terms':
         return <AcademicTermsPage />
+
+      case 'Programs':
+        return <ProgramsPage />
 
       default:
         return (
