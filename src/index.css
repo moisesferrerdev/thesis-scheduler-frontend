@@ -18,3 +18,11 @@ body {
   min-width: 320px;
   min-height: 100vh;
 }
+
+.form-input {
+  @apply w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-800 outline-none transition;
+}
+
+.form-input:focus {
+  @apply border-blue-500 ring-2 ring-blue-100;
+}

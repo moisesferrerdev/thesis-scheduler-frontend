@@ -1,10 +1,13 @@
-
 import { useState } from 'react'
 
 import MainLayout from './layouts/MainLayout'
 import DashboardPage from './pages/Dashboard/DashboardPage'
 import AcademicTermsPage from './pages/AcademicSetup/AcademicTermsPage'
 import ProgramsPage from './pages/AcademicSetup/ProgramsPage'
+// import ProgramMajorsPage from './pages/AcademicSetup/ProgramMajorsPage'
+import SubjectsPage from './pages/AcademicSetup/SubjectsPage'
+import CurriculaPage from './pages/AcademicSetup/CurriculaPage'
+import StudentSectionsPage from './pages/AcademicSetup/StudentSectionsPage'
 
 function App() {
   const [activePage, setActivePage] = useState('Dashboard')
@@ -23,6 +26,18 @@ function App() {
 
       case 'Programs':
         return <ProgramsPage />
+
+      // case 'Program Majors':
+      //   return <ProgramMajorsPage />
+
+      case 'Subjects':
+        return <SubjectsPage />
+
+      case 'Curricula':
+        return <CurriculaPage />
+      
+      case 'Student Sections':
+        return <StudentSectionsPage />
 
       default:
         return (

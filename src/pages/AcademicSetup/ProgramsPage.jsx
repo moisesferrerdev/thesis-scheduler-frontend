@@ -1,5 +1,5 @@
+import { useEffect, useMemo, useState } from 'react'
 
-import { useMemo, useState } from 'react'
 import {
   Plus,
   Search,
@@ -12,7 +12,7 @@ import {
   ChevronDown,
 } from 'lucide-react'
 
-import initialPrograms from '../../data/mock/programs'
+import programService from '../../services/api/programService'
 
 const emptyForm = {
   programCode: '',
@@ -22,20 +22,83 @@ const emptyForm = {
 }
 
 function ProgramsPage() {
-  const [programs, setPrograms] = useState(initialPrograms)
+  // Program records and API states
+  const [programs, setPrograms] = useState([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [pageError, setPageError] = useState('')
+
+  // Search and filter states
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('ALL')
 
+  // Modal and form states
   const [modalType, setModalType] = useState(null)
   const [selectedProgram, setSelectedProgram] = useState(null)
   const [formData, setFormData] = useState(emptyForm)
   const [errors, setErrors] = useState({})
 
+  // Get a readable API error message
+  const getErrorMessage = (error) => {
+    return (
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.message ||
+      'Something went wrong. Please try again.'
+    )
+  }
+
+  // Load programs from the backend
+  const fetchPrograms = async () => {
+    try {
+      setPageError('')
+
+      const data = await programService.getAll()
+
+      setPrograms(data)
+    } catch (error) {
+      setPageError(getErrorMessage(error))
+    }
+  }
+
+  // Initial API request when the page loads
+  useEffect(() => {
+    let ignore = false
+
+    const loadPrograms = async () => {
+      try {
+        const data = await programService.getAll()
+
+        if (!ignore) {
+          setPrograms(data)
+        }
+      } catch (error) {
+        if (!ignore) {
+          setPageError(getErrorMessage(error))
+        }
+      } finally {
+        if (!ignore) {
+          setIsLoading(false)
+        }
+      }
+    }
+
+    loadPrograms()
+
+    return () => {
+      ignore = true
+    }
+  }, [])
+
+  // Summary calculations
   const totalPrograms = programs.length
+
   const activePrograms = programs.filter(
     (program) => program.status === 'ACTIVE'
   ).length
 
+  // Search and status filtering
   const filteredPrograms = useMemo(() => {
     return programs.filter((program) => {
       const search = searchTerm.toLowerCase()
@@ -51,6 +114,7 @@ function ProgramsPage() {
     })
   }, [programs, searchTerm, statusFilter])
 
+  // Open Add modal
   const openAddModal = () => {
     setSelectedProgram(null)
     setFormData(emptyForm)
@@ -58,28 +122,34 @@ function ProgramsPage() {
     setModalType('add')
   }
 
+  // Open Edit modal
   const openEditModal = (program) => {
     setSelectedProgram(program)
+
     setFormData({
       programCode: program.programCode,
       programName: program.programName,
       description: program.description || '',
       status: program.status,
     })
+
     setErrors({})
     setModalType('edit')
   }
 
+  // Open View modal
   const openViewModal = (program) => {
     setSelectedProgram(program)
     setModalType('view')
   }
 
+  // Open Delete modal
   const openDeleteModal = (program) => {
     setSelectedProgram(program)
     setModalType('delete')
   }
 
+  // Close modal
   const closeModal = () => {
     setModalType(null)
     setSelectedProgram(null)
@@ -87,6 +157,7 @@ function ProgramsPage() {
     setErrors({})
   }
 
+  // Handle form input changes
   const handleInputChange = (event) => {
     const { name, value } = event.target
 
@@ -101,6 +172,7 @@ function ProgramsPage() {
     }))
   }
 
+  // Validate program form
   const validateForm = () => {
     const newErrors = {}
 
@@ -128,10 +200,12 @@ function ProgramsPage() {
     }
 
     setErrors(newErrors)
+
     return Object.keys(newErrors).length === 0
   }
 
-  const handleSubmit = (event) => {
+  // Create or update program through the backend
+  const handleSubmit = async (event) => {
     event.preventDefault()
 
     if (!validateForm()) return
@@ -143,37 +217,46 @@ function ProgramsPage() {
       description: formData.description.trim(),
     }
 
-    if (modalType === 'add') {
-      const newProgram = {
-        programId:
-          Math.max(0, ...programs.map((program) => program.programId)) + 1,
-        ...normalizedData,
+    try {
+      setIsSaving(true)
+      setPageError('')
+
+      if (modalType === 'add') {
+        await programService.create(normalizedData)
+      } else {
+        await programService.update(
+          selectedProgram.programId,
+          normalizedData
+        )
       }
 
-      setPrograms((previous) => [...previous, newProgram])
-    } else {
-      setPrograms((previous) =>
-        previous.map((program) =>
-          program.programId === selectedProgram.programId
-            ? { ...program, ...normalizedData }
-            : program
-        )
-      )
+      await fetchPrograms()
+      closeModal()
+    } catch (error) {
+      setPageError(getErrorMessage(error))
+    } finally {
+      setIsSaving(false)
     }
-
-    closeModal()
   }
 
-  const handleDelete = () => {
-    setPrograms((previous) =>
-      previous.filter(
-        (program) => program.programId !== selectedProgram.programId
-      )
-    )
+  // Delete program through the backend
+  const handleDelete = async () => {
+    try {
+      setIsDeleting(true)
+      setPageError('')
 
-    closeModal()
+      await programService.delete(selectedProgram.programId)
+
+      await fetchPrograms()
+      closeModal()
+    } catch (error) {
+      setPageError(getErrorMessage(error))
+    } finally {
+      setIsDeleting(false)
+    }
   }
 
+  // Status badge styling
   const getStatusStyle = (status) => {
     return status === 'ACTIVE'
       ? 'bg-green-50 text-green-700 ring-green-600/20'
@@ -188,6 +271,7 @@ function ProgramsPage() {
           <h1 className="text-2xl font-bold text-slate-900">
             Programs
           </h1>
+
           <p className="mt-1 text-sm text-slate-500">
             Manage the academic programs offered by the institution.
           </p>
@@ -202,6 +286,23 @@ function ProgramsPage() {
         </button>
       </div>
 
+      {/* API Error Message */}
+      {pageError && (
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          {pageError}
+        </div>
+      )}
+
+      {/* Loading Message */}
+      {isLoading && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+          Loading programs...
+        </div>
+      )}
+
       {/* Summary Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -210,10 +311,12 @@ function ProgramsPage() {
               <p className="text-sm font-medium text-slate-500">
                 Total Programs
               </p>
+
               <h2 className="mt-2 text-3xl font-bold text-slate-900">
                 {totalPrograms}
               </h2>
             </div>
+
             <div className="rounded-xl bg-blue-50 p-3 text-blue-700">
               <GraduationCap size={24} />
             </div>
@@ -226,10 +329,12 @@ function ProgramsPage() {
               <p className="text-sm font-medium text-slate-500">
                 Active Programs
               </p>
+
               <h2 className="mt-2 text-3xl font-bold text-slate-900">
                 {activePrograms}
               </h2>
             </div>
+
             <div className="rounded-xl bg-green-50 p-3 text-green-700">
               <CheckCircle2 size={24} />
             </div>
@@ -243,6 +348,7 @@ function ProgramsPage() {
           <h2 className="font-semibold text-slate-900">
             Program Records
           </h2>
+
           <p className="mt-1 text-sm text-slate-500">
             View and manage registered academic programs.
           </p>
@@ -253,6 +359,7 @@ function ProgramsPage() {
                 size={18}
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
               />
+
               <input
                 type="text"
                 value={searchTerm}
@@ -272,6 +379,7 @@ function ProgramsPage() {
                 <option value="ACTIVE">Active</option>
                 <option value="INACTIVE">Inactive</option>
               </select>
+
               <ChevronDown
                 size={16}
                 className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
@@ -285,10 +393,21 @@ function ProgramsPage() {
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-6 py-4 font-semibold">Program Code</th>
-                <th className="px-6 py-4 font-semibold">Program Name</th>
-                <th className="px-6 py-4 font-semibold">Status</th>
-                <th className="px-6 py-4 text-right font-semibold">Actions</th>
+                <th className="px-6 py-4 font-semibold">
+                  Program Code
+                </th>
+
+                <th className="px-6 py-4 font-semibold">
+                  Program Name
+                </th>
+
+                <th className="px-6 py-4 font-semibold">
+                  Status
+                </th>
+
+                <th className="px-6 py-4 text-right font-semibold">
+                  Actions
+                </th>
               </tr>
             </thead>
 
@@ -319,6 +438,7 @@ function ProgramsPage() {
                       <button
                         onClick={() => openViewModal(program)}
                         title="View"
+                        aria-label={`View ${program.programCode}`}
                         className="rounded-lg p-2 text-slate-500 hover:bg-blue-50 hover:text-blue-700"
                       >
                         <Eye size={17} />
@@ -327,6 +447,7 @@ function ProgramsPage() {
                       <button
                         onClick={() => openEditModal(program)}
                         title="Edit"
+                        aria-label={`Edit ${program.programCode}`}
                         className="rounded-lg p-2 text-slate-500 hover:bg-amber-50 hover:text-amber-700"
                       >
                         <Pencil size={17} />
@@ -335,6 +456,7 @@ function ProgramsPage() {
                       <button
                         onClick={() => openDeleteModal(program)}
                         title="Delete"
+                        aria-label={`Delete ${program.programCode}`}
                         className="rounded-lg p-2 text-slate-500 hover:bg-red-50 hover:text-red-700"
                       >
                         <Trash2 size={17} />
@@ -344,7 +466,7 @@ function ProgramsPage() {
                 </tr>
               ))}
 
-              {filteredPrograms.length === 0 && (
+              {!isLoading && filteredPrograms.length === 0 && (
                 <tr>
                   <td
                     colSpan="4"
@@ -361,12 +483,16 @@ function ProgramsPage() {
         {/* Mobile Cards */}
         <div className="divide-y divide-slate-100 md:hidden">
           {filteredPrograms.map((program) => (
-            <div key={program.programId} className="space-y-3 p-4">
+            <div
+              key={program.programId}
+              className="space-y-3 p-4"
+            >
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="font-semibold text-slate-900">
                     {program.programCode}
                   </p>
+
                   <p className="mt-1 text-sm text-slate-600">
                     {program.programName}
                   </p>
@@ -383,21 +509,23 @@ function ProgramsPage() {
                 <button
                   onClick={() => openViewModal(program)}
                   className="rounded-lg p-2 text-slate-500 hover:bg-blue-50 hover:text-blue-700"
-                  aria-label="View program"
+                  aria-label={`View ${program.programCode}`}
                 >
                   <Eye size={17} />
                 </button>
+
                 <button
                   onClick={() => openEditModal(program)}
                   className="rounded-lg p-2 text-slate-500 hover:bg-amber-50 hover:text-amber-700"
-                  aria-label="Edit program"
+                  aria-label={`Edit ${program.programCode}`}
                 >
                   <Pencil size={17} />
                 </button>
+
                 <button
                   onClick={() => openDeleteModal(program)}
                   className="rounded-lg p-2 text-slate-500 hover:bg-red-50 hover:text-red-700"
-                  aria-label="Delete program"
+                  aria-label={`Delete ${program.programCode}`}
                 >
                   <Trash2 size={17} />
                 </button>
@@ -405,7 +533,7 @@ function ProgramsPage() {
             </div>
           ))}
 
-          {filteredPrograms.length === 0 && (
+          {!isLoading && filteredPrograms.length === 0 && (
             <p className="px-4 py-12 text-center text-sm text-slate-500">
               No programs found.
             </p>
@@ -428,6 +556,7 @@ function ProgramsPage() {
                 <h2 className="text-lg font-bold text-slate-900">
                   {modalType === 'add' ? 'Add Program' : 'Edit Program'}
                 </h2>
+
                 <p className="mt-1 text-sm text-slate-500">
                   {modalType === 'add'
                     ? 'Enter the details of the new academic program.'
@@ -449,6 +578,7 @@ function ProgramsPage() {
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
                   Program Code <span className="text-red-500">*</span>
                 </label>
+
                 <input
                   type="text"
                   name="programCode"
@@ -462,6 +592,7 @@ function ProgramsPage() {
                       : 'border-slate-300 focus:border-blue-500'
                   }`}
                 />
+
                 {errors.programCode && (
                   <p className="mt-1 text-xs text-red-600">
                     {errors.programCode}
@@ -473,6 +604,7 @@ function ProgramsPage() {
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
                   Program Name <span className="text-red-500">*</span>
                 </label>
+
                 <input
                   type="text"
                   name="programName"
@@ -485,6 +617,7 @@ function ProgramsPage() {
                       : 'border-slate-300 focus:border-blue-500'
                   }`}
                 />
+
                 {errors.programName && (
                   <p className="mt-1 text-xs text-red-600">
                     {errors.programName}
@@ -496,6 +629,7 @@ function ProgramsPage() {
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
                   Description
                 </label>
+
                 <textarea
                   name="description"
                   value={formData.description}
@@ -510,6 +644,7 @@ function ProgramsPage() {
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">
                   Status
                 </label>
+
                 <select
                   name="status"
                   value={formData.status}
@@ -525,16 +660,22 @@ function ProgramsPage() {
                 <button
                   type="button"
                   onClick={closeModal}
-                  className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  disabled={isSaving}
+                  className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
                 >
                   Cancel
                 </button>
 
                 <button
                   type="submit"
-                  className="rounded-lg bg-[#17365D] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#102947]"
+                  disabled={isSaving}
+                  className="rounded-lg bg-[#17365D] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#102947] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {modalType === 'add' ? 'Save Program' : 'Save Changes'}
+                  {isSaving
+                    ? 'Saving...'
+                    : modalType === 'add'
+                      ? 'Save Program'
+                      : 'Save Changes'}
                 </button>
               </div>
             </form>
@@ -550,6 +691,7 @@ function ProgramsPage() {
               <h2 className="text-lg font-bold text-slate-900">
                 Program Details
               </h2>
+
               <button
                 onClick={closeModal}
                 className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"
@@ -564,6 +706,7 @@ function ProgramsPage() {
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
                   Program Code
                 </p>
+
                 <p className="mt-1 font-semibold text-slate-900">
                   {selectedProgram.programCode}
                 </p>
@@ -573,6 +716,7 @@ function ProgramsPage() {
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
                   Program Name
                 </p>
+
                 <p className="mt-1 text-sm text-slate-900">
                   {selectedProgram.programName}
                 </p>
@@ -582,6 +726,7 @@ function ProgramsPage() {
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
                   Description
                 </p>
+
                 <p className="mt-1 text-sm text-slate-600">
                   {selectedProgram.description || 'No description provided.'}
                 </p>
@@ -591,6 +736,7 @@ function ProgramsPage() {
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
                   Status
                 </p>
+
                 <span
                   className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusStyle(selectedProgram.status)}`}
                 >
@@ -634,16 +780,18 @@ function ProgramsPage() {
             <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 onClick={closeModal}
-                className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                disabled={isDeleting}
+                className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
               >
                 Cancel
               </button>
 
               <button
                 onClick={handleDelete}
-                className="rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700"
+                disabled={isDeleting}
+                className="rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Delete Program
+                {isDeleting ? 'Deleting...' : 'Delete Program'}
               </button>
             </div>
           </div>

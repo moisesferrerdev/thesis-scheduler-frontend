@@ -1,5 +1,4 @@
-
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Plus,
   Search,
@@ -11,15 +10,15 @@ import {
   GraduationCap,
   CheckCircle2,
   ChevronDown,
+  RefreshCw,
 } from 'lucide-react'
 
-import initialAcademicTerms from '../../data/mock/academicTerms'
+import academicTermService from '../../services/api/academicTermService'
 
-// Available semester options
 const SEMESTERS = [
-  { value: 'FIRST', label: 'First Semester' },
-  { value: 'SECOND', label: 'Second Semester' },
-  { value: 'SUMMER', label: 'Summer' },
+  { value: '1st Semester', label: 'First Semester' },
+  { value: '2nd Semester', label: 'Second Semester' },
+  { value: 'Summer', label: 'Summer' },
 ]
 
 const emptyForm = {
@@ -37,7 +36,6 @@ const statusStyles = {
   COMPLETED: 'bg-slate-100 text-slate-600',
 }
 
-// Format dates for display
 function formatDate(date) {
   if (!date) return '—'
 
@@ -51,12 +49,25 @@ function formatDate(date) {
   )
 }
 
-// Generate academic years automatically
+function getSemesterLabel(value) {
+  return (
+    SEMESTERS.find((semester) => semester.value === value)?.label ||
+    value ||
+    '—'
+  )
+}
+
+function generateTermName(semester, academicYear) {
+  if (!semester || !academicYear) return ''
+
+  return `${getSemesterLabel(semester)} - ${academicYear}`
+}
+
 function generateAcademicYears(terms) {
   const currentYear = new Date().getFullYear()
 
   const existingYears = terms
-    .map((term) => Number(term.academicYear.split('-')[0]))
+    .map((term) => Number(term.academicYear?.split('-')[0]))
     .filter(Number.isFinite)
 
   const earliestYear = Math.min(
@@ -77,7 +88,7 @@ function generateAcademicYears(terms) {
   return [
     ...new Set([
       ...years,
-      ...terms.map((term) => term.academicYear),
+      ...terms.map((term) => term.academicYear).filter(Boolean),
     ]),
   ].sort(
     (a, b) =>
@@ -85,7 +96,6 @@ function generateAcademicYears(terms) {
   )
 }
 
-// Get semesters that have not yet been registered
 function getAvailableSemesters(
   year,
   terms,
@@ -101,15 +111,54 @@ function getAvailableSemesters(
   })
 }
 
+function getErrorMessage(error) {
+  return (
+    error.response?.data?.message ||
+    error.response?.data?.error ||
+    error.message ||
+    'Something went wrong. Please try again.'
+  )
+}
+
 function AcademicTermsPage() {
-  const [terms, setTerms] = useState(initialAcademicTerms)
+  const [terms, setTerms] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('ALL')
 
   const [modalType, setModalType] = useState(null)
   const [selectedTerm, setSelectedTerm] = useState(null)
   const [formData, setFormData] = useState(emptyForm)
+
   const [formError, setFormError] = useState('')
+  const [pageError, setPageError] = useState('')
+
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+
+  // Load academic terms from backend
+  const loadAcademicTerms = useCallback(async () => {
+    setPageError('')
+
+    try {
+      const response =
+        await academicTermService.getAllAcademicTerms()
+
+      setTerms(Array.isArray(response) ? response : [])
+    } catch (error) {
+      setPageError(getErrorMessage(error))
+    }
+  }, [])
+
+  useEffect(() => {
+    const initializePage = async () => {
+      setIsLoading(true)
+      await loadAcademicTerms()
+      setIsLoading(false)
+    }
+
+    initializePage()
+  }, [loadAcademicTerms])
 
   // Search and filter
   const filteredTerms = useMemo(() => {
@@ -117,9 +166,9 @@ function AcademicTermsPage() {
       const search = searchTerm.toLowerCase()
 
       const matchesSearch =
-        term.termName.toLowerCase().includes(search) ||
-        term.academicYear.toLowerCase().includes(search) ||
-        term.semester.toLowerCase().includes(search)
+        (term.termName || '').toLowerCase().includes(search) ||
+        (term.academicYear || '').toLowerCase().includes(search) ||
+        (term.semester || '').toLowerCase().includes(search)
 
       const matchesStatus =
         statusFilter === 'ALL' ||
@@ -134,7 +183,7 @@ function AcademicTermsPage() {
     (term) => term.status === 'ACTIVE'
   ).length
 
-  // Generate and filter academic year options
+  // Academic year options
   const academicYearOptions = generateAcademicYears(terms)
 
   const availableAcademicYears = academicYearOptions.filter(
@@ -152,7 +201,7 @@ function AcademicTermsPage() {
     }
   )
 
-  // Available semesters for the selected academic year
+  // Semester options for selected academic year
   const availableSemesters = getAvailableSemesters(
     formData.academicYear,
     terms,
@@ -174,12 +223,12 @@ function AcademicTermsPage() {
     setSelectedTerm(term)
 
     setFormData({
-      termName: term.termName,
-      academicYear: term.academicYear,
-      semester: term.semester,
-      startDate: term.startDate,
-      endDate: term.endDate,
-      status: term.status,
+      termName: term.termName || '',
+      academicYear: term.academicYear || '',
+      semester: term.semester || '',
+      startDate: term.startDate || '',
+      endDate: term.endDate || '',
+      status: term.status || 'UPCOMING',
     })
 
     setFormError('')
@@ -200,8 +249,11 @@ function AcademicTermsPage() {
 
   // Close modal
   const closeModal = () => {
+    if (isSaving || isDeleting) return
+
     setModalType(null)
     setSelectedTerm(null)
+    setFormData(emptyForm)
     setFormError('')
   }
 
@@ -209,8 +261,6 @@ function AcademicTermsPage() {
   const handleInputChange = (event) => {
     const { name, value } = event.target
 
-    // When academic year changes,
-    // automatically select the first available semester
     if (name === 'academicYear') {
       const excludedId =
         modalType === 'edit'
@@ -223,27 +273,27 @@ function AcademicTermsPage() {
         excludedId
       )
 
+      const selectedSemester = available[0]?.value || ''
+
       setFormData((previous) => ({
         ...previous,
         academicYear: value,
-        semester: available[0]?.value ?? '',
-        termName: available[0]?.label ?? '',
+        semester: selectedSemester,
+        termName: generateTermName(selectedSemester, value),
       }))
 
       setFormError('')
       return
     }
 
-    // Keep termName and semester synchronized
     if (name === 'semester') {
-      const selectedSemester = SEMESTERS.find(
-        (semester) => semester.value === value
-      )
-
       setFormData((previous) => ({
         ...previous,
         semester: value,
-        termName: selectedSemester?.label ?? '',
+        termName: generateTermName(
+          value,
+          previous.academicYear
+        ),
       }))
 
       setFormError('')
@@ -259,11 +309,12 @@ function AcademicTermsPage() {
   }
 
   // Add or update academic term
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
 
+    if (isSaving) return
+
     if (
-      !formData.termName.trim() ||
       !formData.academicYear ||
       !formData.semester ||
       !formData.startDate ||
@@ -295,42 +346,69 @@ function AcademicTermsPage() {
       return
     }
 
-    if (modalType === 'add') {
-      const newTerm = {
-        ...formData,
-        termId:
-          Math.max(0, ...terms.map((term) => term.termId)) + 1,
-      }
-
-      setTerms((previous) => [
-        ...previous,
-        newTerm,
-      ])
-    } else {
-      setTerms((previous) =>
-        previous.map((term) =>
-          term.termId === selectedTerm.termId
-            ? { ...term, ...formData }
-            : term
-        )
-      )
+    const payload = {
+      termName: generateTermName(
+        formData.semester,
+        formData.academicYear
+      ),
+      academicYear: formData.academicYear,
+      semester: formData.semester,
+      startDate: formData.startDate,
+      endDate: formData.endDate,
+      status: formData.status,
     }
 
-    closeModal()
+    setIsSaving(true)
+    setFormError('')
+
+    try {
+      if (modalType === 'add') {
+        await academicTermService.createAcademicTerm(payload)
+      } else {
+        await academicTermService.updateAcademicTerm(
+          selectedTerm.termId,
+          payload
+        )
+      }
+
+      await loadAcademicTerms()
+
+      setModalType(null)
+      setSelectedTerm(null)
+      setFormData(emptyForm)
+    } catch (error) {
+      setFormError(getErrorMessage(error))
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   // Delete academic term
-  const handleDelete = () => {
-    setTerms((previous) =>
-      previous.filter(
-        (term) => term.termId !== selectedTerm.termId
-      )
-    )
+  const handleDelete = async () => {
+    if (!selectedTerm || isDeleting) return
 
-    closeModal()
+    setIsDeleting(true)
+
+    try {
+      await academicTermService.deleteAcademicTerm(
+        selectedTerm.termId
+      )
+
+      await loadAcademicTerms()
+
+      setModalType(null)
+      setSelectedTerm(null)
+    } catch (error) {
+      setPageError(getErrorMessage(error))
+      setModalType(null)
+    } finally {
+      setIsDeleting(false)
+    }
   }
 
   const getStatusLabel = (status) => {
+    if (!status) return '—'
+
     return status.charAt(0) + status.slice(1).toLowerCase()
   }
 
@@ -348,15 +426,48 @@ function AcademicTermsPage() {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={openAddModal}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#172B4D] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#243D63]"
-        >
-          <Plus size={18} />
-          Add Term
-        </button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            onClick={loadAcademicTerms}
+            disabled={isLoading}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <RefreshCw
+              size={17}
+              className={isLoading ? 'animate-spin' : ''}
+            />
+            Refresh
+          </button>
+
+          <button
+            type="button"
+            onClick={openAddModal}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#172B4D] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#243D63]"
+          >
+            <Plus size={18} />
+            Add Term
+          </button>
+        </div>
       </section>
+
+      {/* Page Error */}
+      {pageError && (
+        <div
+          role="alert"
+          className="flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+        >
+          <span>{pageError}</span>
+
+          <button
+            type="button"
+            onClick={() => setPageError('')}
+            aria-label="Dismiss error"
+          >
+            <X size={17} />
+          </button>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -464,87 +575,102 @@ function AcademicTermsPage() {
             </thead>
 
             <tbody className="divide-y divide-slate-100">
-              {filteredTerms.map((term) => (
-                <tr
-                  key={term.termId}
-                  className="transition hover:bg-slate-50"
-                >
-                  <td className="px-5 py-4 font-medium text-slate-800">
-                    {term.academicYear}
-                  </td>
-
-                  <td className="px-5 py-4 text-slate-700">
-                    {term.termName}
-                  </td>
-
-                  <td className="px-5 py-4 text-slate-600">
-                    {formatDate(term.startDate)}
-                  </td>
-
-                  <td className="px-5 py-4 text-slate-600">
-                    {formatDate(term.endDate)}
-                  </td>
-
-                  <td className="px-5 py-4">
-                    <span
-                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                        statusStyles[term.status] ?? statusStyles.COMPLETED
-                      }`}
-                    >
-                      {getStatusLabel(term.status)}
-                    </span>
-                  </td>
-
-                  <td className="px-5 py-4">
-                    <div className="flex justify-end gap-1">
-                      <button
-                        type="button"
-                        onClick={() => openViewModal(term)}
-                        title="View term"
-                        className="rounded-lg p-2 text-slate-500 hover:bg-blue-50 hover:text-blue-700"
-                      >
-                        <Eye size={17} />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => openEditModal(term)}
-                        title="Edit term"
-                        className="rounded-lg p-2 text-slate-500 hover:bg-blue-50 hover:text-blue-700"
-                      >
-                        <Pencil size={17} />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => openDeleteModal(term)}
-                        title="Delete term"
-                        className="rounded-lg p-2 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                      >
-                        <Trash2 size={17} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-
-              {filteredTerms.length === 0 && (
+              {isLoading ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-12 text-center">
-                    <CalendarDays
-                      size={30}
-                      className="mx-auto text-slate-300"
-                    />
-
-                    <p className="mt-3 font-medium text-slate-700">
-                      No academic terms found
-                    </p>
-
-                    <p className="mt-1 text-sm text-slate-500">
-                      Try changing your search or filter.
-                    </p>
+                  <td
+                    colSpan={6}
+                    className="px-5 py-12 text-center text-sm text-slate-500"
+                  >
+                    Loading academic terms...
                   </td>
                 </tr>
+              ) : (
+                <>
+                  {filteredTerms.map((term) => (
+                    <tr
+                      key={term.termId}
+                      className="transition hover:bg-slate-50"
+                    >
+                      <td className="px-5 py-4 font-medium text-slate-800">
+                        {term.academicYear}
+                      </td>
+
+                      <td className="px-5 py-4 text-slate-700">
+                        {term.termName ||
+                          generateTermName(term.semester, term.academicYear)}
+                      </td>
+
+                      <td className="px-5 py-4 text-slate-600">
+                        {formatDate(term.startDate)}
+                      </td>
+
+                      <td className="px-5 py-4 text-slate-600">
+                        {formatDate(term.endDate)}
+                      </td>
+
+                      <td className="px-5 py-4">
+                        <span
+                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                            statusStyles[term.status] ??
+                            statusStyles.COMPLETED
+                          }`}
+                        >
+                          {getStatusLabel(term.status)}
+                        </span>
+                      </td>
+
+                      <td className="px-5 py-4">
+                        <div className="flex justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => openViewModal(term)}
+                            title="View term"
+                            className="rounded-lg p-2 text-slate-500 hover:bg-blue-50 hover:text-blue-700"
+                          >
+                            <Eye size={17} />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(term)}
+                            title="Edit term"
+                            className="rounded-lg p-2 text-slate-500 hover:bg-blue-50 hover:text-blue-700"
+                          >
+                            <Pencil size={17} />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => openDeleteModal(term)}
+                            title="Delete term"
+                            className="rounded-lg p-2 text-slate-500 hover:bg-red-50 hover:text-red-600"
+                          >
+                            <Trash2 size={17} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+
+                  {filteredTerms.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-5 py-12 text-center">
+                        <CalendarDays
+                          size={30}
+                          className="mx-auto text-slate-300"
+                        />
+
+                        <p className="mt-3 font-medium text-slate-700">
+                          No academic terms found
+                        </p>
+
+                        <p className="mt-1 text-sm text-slate-500">
+                          Try changing your search or filter.
+                        </p>
+                      </td>
+                    </tr>
+                  )}
+                </>
               )}
             </tbody>
           </table>
@@ -604,8 +730,18 @@ function AcademicTermsPage() {
               <div className="space-y-4 p-6">
                 {[
                   ['Academic Year', selectedTerm.academicYear],
-                  ['Term Name', selectedTerm.termName],
-                  ['Semester', selectedTerm.semester],
+                  [
+                    'Term Name',
+                    selectedTerm.termName ||
+                      generateTermName(
+                        selectedTerm.semester,
+                        selectedTerm.academicYear
+                      ),
+                  ],
+                  [
+                    'Semester',
+                    getSemesterLabel(selectedTerm.semester),
+                  ],
                   ['Start Date', formatDate(selectedTerm.startDate)],
                   ['End Date', formatDate(selectedTerm.endDate)],
                   ['Status', getStatusLabel(selectedTerm.status)],
@@ -653,7 +789,8 @@ function AcademicTermsPage() {
                     value={formData.academicYear}
                     onChange={handleInputChange}
                     required
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    disabled={isSaving}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
                   >
                     <option value="">Select Academic Year</option>
 
@@ -676,7 +813,11 @@ function AcademicTermsPage() {
                     value={formData.semester}
                     onChange={handleInputChange}
                     required
-                    disabled={!formData.academicYear || availableSemesters.length === 0}
+                    disabled={
+                      isSaving ||
+                      !formData.academicYear ||
+                      availableSemesters.length === 0
+                    }
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
                   >
                     <option value="">Select Semester</option>
@@ -692,6 +833,27 @@ function AcademicTermsPage() {
                   </select>
                 </div>
 
+                {/* Generated Term Name Preview */}
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                    Term Name
+                  </label>
+
+                  <input
+                    type="text"
+                    value={generateTermName(
+                      formData.semester,
+                      formData.academicYear
+                    )}
+                    readOnly
+                    placeholder="Automatically generated"
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-600 outline-none"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Generated automatically from the selected semester and academic year.
+                  </p>
+                </div>
+
                 {/* Dates */}
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
@@ -705,7 +867,8 @@ function AcademicTermsPage() {
                       value={formData.startDate}
                       onChange={handleInputChange}
                       required
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      disabled={isSaving}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
                     />
                   </div>
 
@@ -720,7 +883,8 @@ function AcademicTermsPage() {
                       value={formData.endDate}
                       onChange={handleInputChange}
                       required
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      disabled={isSaving}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
                     />
                   </div>
                 </div>
@@ -736,7 +900,8 @@ function AcademicTermsPage() {
                     value={formData.status}
                     onChange={handleInputChange}
                     required
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    disabled={isSaving}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
                   >
                     <option value="UPCOMING">Upcoming</option>
                     <option value="ACTIVE">Active</option>
@@ -756,18 +921,22 @@ function AcademicTermsPage() {
                   <button
                     type="button"
                     onClick={closeModal}
-                    className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    disabled={isSaving}
+                    className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
                   >
                     Cancel
                   </button>
 
                   <button
                     type="submit"
-                    className="rounded-lg bg-[#172B4D] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#243D63]"
+                    disabled={isSaving}
+                    className="rounded-lg bg-[#172B4D] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#243D63] disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {modalType === 'add'
-                      ? 'Create Term'
-                      : 'Save Changes'}
+                    {isSaving
+                      ? 'Saving...'
+                      : modalType === 'add'
+                        ? 'Create Term'
+                        : 'Save Changes'}
                   </button>
                 </div>
               </form>
@@ -784,21 +953,34 @@ function AcademicTermsPage() {
                   <div>
                     <p className="text-sm text-slate-700">
                       Are you sure you want to delete{' '}
-                      <strong>{selectedTerm.termName}</strong> for{' '}
-                      <strong>{selectedTerm.academicYear}</strong>?
+                      <strong>
+                        {selectedTerm.termName ||
+                          generateTermName(
+                            selectedTerm.semester,
+                            selectedTerm.academicYear
+                          )}
+                      </strong>
+                      ?
                     </p>
 
                     <p className="mt-2 text-xs text-slate-500">
-                      This removes the record from the current mock session.
+                      This action will permanently remove the academic term if the backend allows deletion.
                     </p>
                   </div>
                 </div>
+
+                {pageError && (
+                  <p role="alert" className="text-sm text-red-600">
+                    {pageError}
+                  </p>
+                )}
 
                 <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
                   <button
                     type="button"
                     onClick={closeModal}
-                    className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    disabled={isDeleting}
+                    className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
                   >
                     Cancel
                   </button>
@@ -806,9 +988,10 @@ function AcademicTermsPage() {
                   <button
                     type="button"
                     onClick={handleDelete}
-                    className="rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700"
+                    disabled={isDeleting}
+                    className="rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    Delete Term
+                    {isDeleting ? 'Deleting...' : 'Delete Term'}
                   </button>
                 </div>
               </div>
