@@ -8,6 +8,10 @@ import ProgramsPage from './pages/AcademicSetup/ProgramsPage'
 import SubjectsPage from './pages/AcademicSetup/SubjectsPage'
 import CurriculaPage from './pages/AcademicSetup/CurriculaPage'
 import StudentSectionsPage from './pages/AcademicSetup/StudentSectionsPage'
+import SubjectOfferingsPage from './pages/AcademicSetup/SubjectOfferingsPage'
+import SectionSubjectsPage from './pages/AcademicSetup/SectionSubjectsPage'
+import InstructorsPage from './pages/FacultyManagement/InstructorsPage'
+import InstructorQualificationsPage from './pages/FacultyManagement/InstructorQualificationsPage'
 
 function App() {
   const [activePage, setActivePage] = useState('Dashboard')
@@ -17,6 +21,7 @@ function App() {
   }
 
   const renderPage = () => {
+    console.log('Current activePage:', JSON.stringify(activePage))
     switch (activePage) {
       case 'Dashboard':
         return <DashboardPage onNavigate={handleNavigate} />
@@ -38,6 +43,18 @@ function App() {
       
       case 'Student Sections':
         return <StudentSectionsPage />
+
+      case 'Subject Offerings':
+        return <SubjectOfferingsPage />
+
+      case 'Section Subjects':
+        return <SectionSubjectsPage />
+
+      case 'Instructors':
+        return <InstructorsPage />
+      
+      case 'Instructor Qualifications':
+        return <InstructorQualificationsPage />
 
       default:
         return (
